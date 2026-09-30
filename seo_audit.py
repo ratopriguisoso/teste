@@ -1,8 +1,10 @@
 import asyncio
+import html
 import ipaddress
 import json
 import socket
 import time
+from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass
 from html.parser import HTMLParser
 from typing import Literal
@@ -14,6 +16,7 @@ USER_AGENT = (
     "Mozilla/5.0 (compatible; CriadorSEO/1.0; +https://github.com/ratopriguisoso/teste)"
 )
 MAX_HTML_BYTES = 3_000_000
+MAX_LINKS_TO_CHECK = 10
 
 Status = Literal["ok", "aviso", "erro"]
 TEXT_TAGS = {"title", "h1", "script", "style", "noscript"}
@@ -32,6 +35,7 @@ class Check:
     detail: str
     hint: str
     weight: int
+    fix: str = ""
 
 
 class PageParser(HTMLParser):
@@ -166,6 +170,17 @@ def valid_json_ld(blocks: list[str]) -> list[str]:
                 kind = item["@type"]
                 types.extend(kind if isinstance(kind, list) else [str(kind)])
     return types
+
+
+def internal_links(page: PageParser, final_url: str) -> list[str]:
+    host = urlparse(final_url).netloc
+    links: dict[str, None] = {}
+    for href in page.hrefs:
+        absolute = urljoin(final_url, href).split("#")[0]
+        parsed = urlparse(absolute)
+        if parsed.scheme in {"http", "https"} and parsed.netloc == host:
+            links[absolute] = None
+    return list(links)
 
 
 def analyze_page(
@@ -371,11 +386,7 @@ def analyze_page(
             2,
         )
     )
-    internal = {
-        urljoin(final_url, href).split("#")[0]
-        for href in page.hrefs
-        if urlparse(urljoin(final_url, href)).netloc == host
-    }
+    internal = internal_links(page, final_url)
     checks.append(
         check(
             "links",
@@ -459,6 +470,135 @@ async def analyze_sitemap(
     )
 
 
+def keyword_check(page: PageParser, keyword: str) -> Check:
+    target = keyword.lower()
+    places = {
+        "título": page.title,
+        "meta description": page.metas.get("description", ""),
+        "H1": " ".join(page.h1),
+    }
+    found = [name for name, text in places.items() if target in text.lower()]
+    missing = [name for name in places if name not in found]
+    return check(
+        "keyword",
+        f"Palavra-chave “{keyword}”",
+        "ok" if not missing else "aviso" if found else "erro",
+        f"Aparece em: {', '.join(found)}."
+        if found
+        else "Não aparece no título, description nem H1.",
+        f"Inclua a palavra-chave em: {', '.join(missing)}.",
+        8,
+    )
+
+
+async def link_status(client: httpx.AsyncClient, link: str) -> tuple[str, int | str]:
+    try:
+        resp = await client.get(link, timeout=8.0)
+        return link, resp.status_code
+    except AuditError:
+        return link, "bloqueado"
+    except httpx.HTTPError as exc:
+        return link, type(exc).__name__
+
+
+def broken_links_check(results: list[tuple[str, int | str]]) -> Check:
+    broken = [
+        (link, status)
+        for link, status in results
+        if not isinstance(status, int) or status >= 400
+    ]
+    return Check(
+        "broken_links",
+        "Links quebrados",
+        "ok" if not broken else "aviso" if len(broken) == 1 else "erro",
+        (
+            f"{len(results)} links verificados, nenhum quebrado."
+            if not broken
+            else f"{len(broken)} de {len(results)} links com erro: "
+            + ", ".join(f"{link} ({status})" for link, status in broken[:5])
+        ),
+        (
+            "Corrija ou remova os links que levam a páginas com erro (404/500). "
+            "O Google penaliza sites com muitos links quebrados."
+            if broken
+            else ""
+        ),
+        6,
+        "\n".join(f"{status}  {link}" for link, status in broken),
+    )
+
+
+def site_name(page: PageParser, final_url: str) -> str:
+    return page.metas.get("og:site_name") or urlparse(final_url).netloc.removeprefix(
+        "www."
+    )
+
+
+def fix_snippets(page: PageParser, final_url: str, keyword: str) -> dict[str, str]:
+    parsed = urlparse(final_url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    name = html.escape(site_name(page, final_url))
+    topic = html.escape(keyword or "Palavra-chave principal")
+    title = html.escape(page.title) or f"{topic} | {name}"
+    current = html.escape(page.metas.get("description", ""))
+    description = (
+        current[:155].rsplit(" ", 1)[0]
+        if len(current) > 160
+        else f"{topic}: descreva em até 155 caracteres o que o visitante encontra aqui e por que clicar."
+    )
+    schema = json.dumps(
+        {
+            "@context": "https://schema.org",
+            "@type": "Organization",
+            "name": site_name(page, final_url),
+            "url": f"{origin}/",
+            "logo": f"{origin}/logo.png",
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    return {
+        "https": (
+            "# .htaccess (Apache): redireciona tudo para HTTPS\n"
+            "RewriteEngine On\n"
+            "RewriteCond %{HTTPS} off\n"
+            "RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]"
+        ),
+        "indexable": '<meta name="robots" content="index, follow">',
+        "title": f"<title>{topic} | {name}</title>",
+        "description": f'<meta name="description" content="{description[:155]}">',
+        "h1": f"<h1>{topic}</h1>\n<!-- troque os outros <h1> da página por <h2> -->",
+        "headings": "<h2>Primeiro tópico</h2>\n<p>...</p>\n<h2>Segundo tópico</h2>\n<p>...</p>",
+        "alt": '<img src="foto.jpg" alt="Descrição curta do que aparece na imagem">',
+        "viewport": '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        "lang": '<html lang="pt-BR">',
+        "canonical": f'<link rel="canonical" href="{final_url}">',
+        "og": (
+            f'<meta property="og:title" content="{title}">\n'
+            f'<meta property="og:description" content="{current or description}">\n'
+            f'<meta property="og:image" content="{origin}/imagem-1200x630.jpg">\n'
+            f'<meta property="og:url" content="{final_url}">\n'
+            '<meta property="og:type" content="website">'
+        ),
+        "schema": f'<script type="application/ld+json">\n{schema}\n</script>',
+        "favicon": '<link rel="icon" href="/favicon.ico">',
+        "robots": f"User-agent: *\nAllow: /\n\nSitemap: {origin}/sitemap.xml",
+        "sitemap": (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            f"  <url><loc>{origin}/</loc></url>\n"
+            "  <!-- uma linha <url> para cada página do site -->\n"
+            "</urlset>\n"
+            f"<!-- salve como {origin}/sitemap.xml e indique no robots.txt -->"
+        ),
+        "keyword": (
+            f"<title>{topic} | {name}</title>\n"
+            f'<meta name="description" content="{topic}: ...">\n'
+            f"<h1>{topic}</h1>"
+        ),
+    }
+
+
 def score(checks: list[Check]) -> int:
     total = sum(c.weight for c in checks)
     earned = sum(
@@ -468,8 +608,14 @@ def score(checks: list[Check]) -> int:
     return round(100 * earned / total) if total else 0
 
 
-async def audit(raw_url: str) -> dict:
+def step(label: str, progress: int) -> dict:
+    return {"type": "step", "label": label, "progress": progress}
+
+
+async def scan(raw_url: str, keyword: str = "") -> AsyncIterator[dict]:
     url = normalize_url(raw_url)
+    keyword = " ".join(keyword.split())[:80]
+    yield step(f"Conectando a {urlparse(url).hostname}", 5)
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(15.0, connect=8.0),
         follow_redirects=True,
@@ -493,18 +639,63 @@ async def audit(raw_url: str) -> dict:
         final_url = str(resp.url)
         parsed = urlparse(final_url)
         origin = f"{parsed.scheme}://{parsed.netloc}"
+
+        yield step("Analisando título, textos, imagens e metatags", 25)
         page = PageParser()
         page.feed(resp.text[:MAX_HTML_BYTES])
         checks = analyze_page(page, final_url, resp, elapsed)
+        if keyword:
+            checks.append(keyword_check(page, keyword))
+
+        yield step("Verificando robots.txt", 40)
         robots_checks, sitemaps = await analyze_robots(client, origin)
         checks += robots_checks
+
+        yield step("Verificando sitemap.xml", 50)
         checks.append(await analyze_sitemap(client, origin, sitemaps))
 
-    return {
-        "url": final_url,
-        "score": score(checks),
-        "title": page.title,
-        "description": page.metas.get("description", ""),
-        "h1": page.h1[:3],
-        "checks": [asdict(c) for c in checks],
+        links = [
+            link
+            for link in internal_links(page, final_url)
+            if link.rstrip("/") != final_url.rstrip("/")
+        ][:MAX_LINKS_TO_CHECK]
+        results: list[tuple[str, int | str]] = []
+        if links:
+            yield step("Procurando links quebrados", 55)
+            pending = [
+                asyncio.ensure_future(link_status(client, link)) for link in links
+            ]
+            for done in asyncio.as_completed(pending):
+                link, status = await done
+                results.append((link, status))
+                yield step(
+                    f"Verificando link {urlparse(link).path or '/'}",
+                    55 + round(40 * len(results) / len(links)),
+                )
+            checks.append(broken_links_check(results))
+
+    yield step("Calculando a nota", 98)
+    fixes = fix_snippets(page, final_url, keyword)
+    for c in checks:
+        if c.status != "ok" and not c.fix:
+            c.fix = fixes.get(c.id, "")
+    yield {
+        "type": "report",
+        "report": {
+            "url": final_url,
+            "keyword": keyword,
+            "score": score(checks),
+            "problems": sum(c.status != "ok" for c in checks),
+            "title": page.title,
+            "description": page.metas.get("description", ""),
+            "h1": page.h1[:3],
+            "checks": [asdict(c) for c in checks],
+        },
     }
+
+
+async def audit(raw_url: str, keyword: str = "") -> dict:
+    async for event in scan(raw_url, keyword):
+        if event["type"] == "report":
+            return event["report"]
+    raise AuditError("A análise terminou sem resultado.")

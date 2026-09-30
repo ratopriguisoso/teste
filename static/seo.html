@@ -26,31 +26,69 @@
 
   <main class="seo-main">
     <div class="seo-wrap">
-      <h1>Seu site aparece no Google?</h1>
-      <p class="muted">Cole o endereço do site para receber uma nota de SEO, o que corrigir e um plano de ação com IA.</p>
-
-      <form id="seo-form" class="seo-form">
-        <input id="seo-url" type="text" inputmode="url" placeholder="https://meusite.com.br" required />
-        <input id="seo-keyword" type="text" placeholder="Assunto principal (opcional): ex. pizzaria em Campinas" />
-        <button id="seo-submit" type="submit" class="primary">Analisar</button>
-      </form>
+      <section class="card scanner">
+        <div id="scan-ring" class="scan-ring" style="--p: 0">
+          <button id="scan-btn" class="scan-btn" type="submit" form="seo-form">
+            <span id="scan-btn-label">ESCANEAR</span>
+          </button>
+        </div>
+        <div class="scan-info">
+          <h1 id="scan-title">Seu site aparece no Google?</h1>
+          <p id="scan-subtitle" class="muted">Cole o endereço e clique em Escanear: procuramos tudo o que impede seu site de aparecer nos buscadores.</p>
+          <form id="seo-form" class="seo-form">
+            <input id="seo-url" type="text" inputmode="url" placeholder="https://meusite.com.br" required />
+            <input id="seo-keyword" type="text" maxlength="80" placeholder="Palavra-chave (opcional): ex. pizzaria em Campinas" />
+          </form>
+          <div id="progress" class="progress hidden"><div id="progress-bar"></div></div>
+          <div id="scan-step" class="scan-step muted"></div>
+        </div>
+      </section>
 
       <div id="seo-error" class="banner hidden"></div>
 
       <section id="seo-report" class="hidden">
-        <div class="seo-summary">
-          <div id="seo-score" class="score"><span></span><small>/100</small></div>
-          <div>
+        <div class="card result-head">
+          <div id="seo-score" class="shield"><span></span><small>/100</small></div>
+          <div class="result-text">
+            <h2 id="result-title"></h2>
             <div id="seo-final-url" class="muted"></div>
-            <div id="seo-counts"></div>
+            <div class="result-actions">
+              <button id="fix-all" type="button" class="primary">🛠 Corrigir problemas</button>
+              <button id="monitor-this" type="button">🛡 Monitorar este site</button>
+              <button id="rescan" type="button">↻ Escanear de novo</button>
+            </div>
           </div>
         </div>
-        <ul id="seo-checks" class="checks"></ul>
 
-        <div class="seo-ai">
-          <button id="seo-suggest" type="button" class="primary">✦ Gerar plano de ação com IA</button>
-          <div id="seo-plan" class="content"></div>
+        <div id="fix-panel" class="card hidden">
+          <h2>Como corrigir</h2>
+          <p class="muted">Copie cada código e cole no seu site (no &lt;head&gt; da página ou no arquivo indicado). Depois clique em “Escanear de novo”.</p>
+          <div id="fix-list"></div>
+          <div class="seo-ai">
+            <button id="seo-suggest" type="button" class="primary">✦ Gerar plano completo com IA</button>
+            <div id="seo-plan" class="content"></div>
+          </div>
         </div>
+
+        <h2 id="problems-title" class="section-title">Problemas encontrados</h2>
+        <ul id="problem-list" class="checks"></ul>
+        <details class="ok-details">
+          <summary id="ok-summary"></summary>
+          <ul id="ok-list" class="checks"></ul>
+        </details>
+      </section>
+
+      <section class="card monitor">
+        <div class="monitor-head">
+          <div>
+            <h2>🛡 Monitoramento contínuo</h2>
+            <p id="monitor-info" class="muted"></p>
+          </div>
+          <button id="enable-alerts" type="button">🔔 Ativar alertas no navegador</button>
+        </div>
+        <div id="monitor-sites" class="monitor-sites"></div>
+        <h3>Alertas recentes</h3>
+        <ul id="monitor-alerts" class="alerts"></ul>
       </section>
     </div>
   </main>

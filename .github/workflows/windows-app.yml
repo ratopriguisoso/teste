@@ -1,0 +1,29 @@
+name: Programa para Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependências
+        run: pip install httpx==0.28.1 pyinstaller==6.16.0
+      - name: Gerar AnalisadorSEO.exe
+        run: pyinstaller --onefile --windowed --name AnalisadorSEO desktop_app.py
+      - name: Testar o .exe (importa e escaneia example.com)
+        shell: pwsh
+        run: |
+          python -c "import desktop_app, seo_audit, asyncio; r = asyncio.run(seo_audit.audit('example.com')); print(r['score'], r['problems'])"
+          if (-not (Test-Path dist/AnalisadorSEO.exe)) { exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AnalisadorSEO-windows
+          path: dist/AnalisadorSEO.exe

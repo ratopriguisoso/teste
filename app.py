@@ -2,7 +2,7 @@ import asyncio
 import html
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 import seo
 import seo_audit
+from monitor import Monitor, MonitorError
 
 BASE_DIR = Path(__file__).parent
 
@@ -177,15 +178,25 @@ def extract_text(name: str, payload: dict) -> str:
 
 
 background_tasks: set[asyncio.Task] = set()
+monitor = Monitor(
+    Path(
+        os.environ.get("MONITOR_FILE", "").strip() or BASE_DIR / "data" / "monitor.json"
+    )
+)
+
+
+def run_in_background(coro: Awaitable[None]) -> None:
+    task = asyncio.ensure_future(coro)
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     site = seo.configured_site_url()
     if site:
-        task = asyncio.create_task(seo.auto_register(site))
-        background_tasks.add(task)
-        task.add_done_callback(background_tasks.discard)
+        run_in_background(seo.auto_register(site))
+    run_in_background(monitor.run_forever())
     yield
 
 
@@ -261,6 +272,7 @@ async def chat(req: ChatRequest) -> StreamingResponse:
 
 class SeoAuditRequest(BaseModel):
     url: str
+    keyword: str = ""
 
 
 class SeoCheck(BaseModel):
@@ -279,9 +291,56 @@ class SeoSuggestRequest(BaseModel):
 @app.post("/api/seo/audit")
 async def seo_audit_endpoint(req: SeoAuditRequest) -> dict:
     try:
-        return await seo_audit.audit(req.url)
+        return await seo_audit.audit(req.url, req.keyword)
     except seo_audit.AuditError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/seo/scan")
+async def seo_scan(req: SeoAuditRequest) -> StreamingResponse:
+    async def events() -> AsyncIterator[str]:
+        try:
+            async for event in seo_audit.scan(req.url, req.keyword):
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+        except seo_audit.AuditError as exc:
+            yield json.dumps({"type": "error", "message": str(exc)}) + "\n"
+
+    return StreamingResponse(events(), media_type="application/x-ndjson")
+
+
+class MonitorRequest(BaseModel):
+    url: str
+    keyword: str = ""
+
+
+@app.get("/api/monitor")
+def monitor_list() -> dict:
+    return monitor.snapshot()
+
+
+@app.post("/api/monitor")
+async def monitor_add(req: MonitorRequest) -> dict:
+    try:
+        return await monitor.add(req.url, req.keyword)
+    except (seo_audit.AuditError, MonitorError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/monitor/check")
+async def monitor_check(req: MonitorRequest) -> dict:
+    try:
+        return await monitor.check(seo_audit.normalize_url(req.url))
+    except (seo_audit.AuditError, MonitorError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/monitor/remove")
+async def monitor_remove(req: MonitorRequest) -> dict:
+    try:
+        await monitor.remove(req.url)
+    except (seo_audit.AuditError, MonitorError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"ok": True}
 
 
 @app.post("/api/seo/suggest")
