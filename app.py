@@ -1,12 +1,21 @@
+import html
 import json
 import os
+import re
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 import httpx
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    PlainTextResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -230,9 +239,77 @@ async def chat(req: ChatRequest) -> StreamingResponse:
     return StreamingResponse(stream(), media_type="text/plain; charset=utf-8")
 
 
-@app.get("/")
-def index() -> FileResponse:
-    return FileResponse(BASE_DIR / "static" / "index.html")
+def site_url(request: Request) -> str:
+    configured = os.environ.get("SITE_URL", "").strip().rstrip("/")
+    return configured or str(request.base_url).rstrip("/")
+
+
+def verification_meta_tags() -> str:
+    tags = {
+        "google-site-verification": "GOOGLE_SITE_VERIFICATION",
+        "msvalidate.01": "BING_SITE_VERIFICATION",
+        "yandex-verification": "YANDEX_SITE_VERIFICATION",
+    }
+    return "\n  ".join(
+        f'<meta name="{name}" content="{html.escape(value)}" />'
+        for name, env in tags.items()
+        if (value := os.environ.get(env, "").strip())
+    )
+
+
+def indexnow_key() -> str | None:
+    key = os.environ.get("INDEXNOW_KEY", "").strip()
+    return key if re.fullmatch(r"[a-zA-Z0-9-]{8,128}", key) else None
+
+
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request) -> str:
+    page = (BASE_DIR / "static" / "index.html").read_text()
+    return page.replace("{{SITE_URL}}", html.escape(site_url(request))).replace(
+        "<!-- SEO_VERIFICATION -->", verification_meta_tags()
+    )
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+def robots(request: Request) -> str:
+    return (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /api/\n\n"
+        f"Sitemap: {site_url(request)}/sitemap.xml\n"
+    )
+
+
+@app.get("/sitemap.xml")
+def sitemap(request: Request) -> Response:
+    lastmod = datetime.fromtimestamp(
+        (BASE_DIR / "static" / "index.html").stat().st_mtime, tz=timezone.utc
+    ).date()
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        "  <url>\n"
+        f"    <loc>{html.escape(site_url(request))}/</loc>\n"
+        f"    <lastmod>{lastmod.isoformat()}</lastmod>\n"
+        "    <changefreq>weekly</changefreq>\n"
+        "    <priority>1.0</priority>\n"
+        "  </url>\n"
+        "</urlset>\n"
+    )
+    return Response(content=xml, media_type="application/xml")
+
+
+@app.get("/favicon.ico")
+def favicon() -> FileResponse:
+    return FileResponse(BASE_DIR / "static" / "favicon.svg", media_type="image/svg+xml")
+
+
+@app.get("/{key}.txt", response_class=PlainTextResponse)
+def indexnow_key_file(key: str) -> str:
+    expected = indexnow_key()
+    if expected is None or key != expected:
+        raise HTTPException(status_code=404)
+    return expected
 
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
