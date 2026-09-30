@@ -34,6 +34,17 @@ Abra http://localhost:8000.
 
 Se as duas chaves estiverem definidas, a da OpenAI é usada.
 
+## Publicar no Render (grátis)
+
+1. Crie uma conta em https://render.com entrando com o GitHub.
+2. Clique em **New → Blueprint** e escolha este repositório (o `render.yaml` já configura tudo).
+3. Quando pedir, cole sua chave em `OPENAI_API_KEY` e clique em **Apply**.
+4. Em alguns minutos o site fica no ar em `https://criador-xxxx.onrender.com`.
+
+No Render o link do site é detectado sozinho (`RENDER_EXTERNAL_URL`), então não precisa definir
+`SITE_URL`, a não ser que use um domínio próprio. No plano grátis o site "dorme" após 15 minutos
+sem visitas e leva cerca de 1 minuto para acordar.
+
 ## Aparecer no Google e outros buscadores (automático)
 
 O site já entrega o que os buscadores precisam: `/robots.txt`, `/sitemap.xml`, meta description,

@@ -27,7 +27,10 @@ google_meta_content: str | None = None
 
 
 def configured_site_url() -> str | None:
-    site = os.environ.get("SITE_URL", "").strip().rstrip("/")
+    site = (
+        os.environ.get("SITE_URL", "").strip()
+        or os.environ.get("RENDER_EXTERNAL_URL", "").strip()
+    ).rstrip("/")
     return site if site.startswith(("http://", "https://")) else None
 
 
