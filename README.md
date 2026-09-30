@@ -23,7 +23,7 @@ Abra http://localhost:8000.
 
 | Variável            | Descrição                                                  |
 |---------------------|------------------------------------------------------------|
-| `OPENAI_API_KEY`    | Chave da OpenAI (usa `gpt-4o-mini` por padrão)             |
+| `OPENAI_API_KEY`    | Chave da OpenAI (usa `gpt-6-luna` por padrão)              |
 | `ANTHROPIC_API_KEY` | Chave da Anthropic (usa `claude-sonnet-4-5` por padrão)    |
 | `MODEL`             | Opcional: troca o modelo usado                             |
 | `SITE_URL`          | Link público do site (ex.: `https://meusite.com.br`); ativa a indexação automática |

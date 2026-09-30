@@ -120,7 +120,7 @@ def build_system_prompt(req: ChatRequest) -> str:
 def provider() -> tuple[str, str] | None:
     model = os.environ.get("MODEL", "").strip()
     if os.environ.get("OPENAI_API_KEY"):
-        return "openai", model or "gpt-4o-mini"
+        return "openai", model or "gpt-6-luna"
     if os.environ.get("ANTHROPIC_API_KEY"):
         return "anthropic", model or "claude-sonnet-4-5"
     return None
