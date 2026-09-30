@@ -1,8 +1,9 @@
+import asyncio
 import html
 import json
 import os
-import re
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -18,6 +19,8 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+import seo
 
 BASE_DIR = Path(__file__).parent
 
@@ -174,7 +177,25 @@ def extract_text(name: str, payload: dict) -> str:
     return ""
 
 
-app = FastAPI(title="Criador - IA para criação de conteúdo")
+background_tasks: set[asyncio.Task] = set()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    site = seo.configured_site_url()
+    if site:
+        try:
+            account = await seo.prepare_google(site)
+        except (httpx.HTTPError, ValueError, KeyError) as exc:
+            seo.log.warning("SEO: não foi possível preparar o Google: %s", exc)
+            account = None
+        task = asyncio.create_task(seo.auto_register(site, account))
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+    yield
+
+
+app = FastAPI(title="Criador - IA para criação de conteúdo", lifespan=lifespan)
 
 
 @app.get("/api/config")
@@ -240,33 +261,14 @@ async def chat(req: ChatRequest) -> StreamingResponse:
 
 
 def site_url(request: Request) -> str:
-    configured = os.environ.get("SITE_URL", "").strip().rstrip("/")
-    return configured or str(request.base_url).rstrip("/")
-
-
-def verification_meta_tags() -> str:
-    tags = {
-        "google-site-verification": "GOOGLE_SITE_VERIFICATION",
-        "msvalidate.01": "BING_SITE_VERIFICATION",
-        "yandex-verification": "YANDEX_SITE_VERIFICATION",
-    }
-    return "\n  ".join(
-        f'<meta name="{name}" content="{html.escape(value)}" />'
-        for name, env in tags.items()
-        if (value := os.environ.get(env, "").strip())
-    )
-
-
-def indexnow_key() -> str | None:
-    key = os.environ.get("INDEXNOW_KEY", "").strip()
-    return key if re.fullmatch(r"[a-zA-Z0-9-]{8,128}", key) else None
+    return seo.configured_site_url() or str(request.base_url).rstrip("/")
 
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> str:
     page = (BASE_DIR / "static" / "index.html").read_text()
     return page.replace("{{SITE_URL}}", html.escape(site_url(request))).replace(
-        "<!-- SEO_VERIFICATION -->", verification_meta_tags()
+        "<!-- SEO_VERIFICATION -->", seo.verification_meta_tags()
     )
 
 
@@ -305,9 +307,9 @@ def favicon() -> FileResponse:
 
 
 @app.get("/{key}.txt", response_class=PlainTextResponse)
-def indexnow_key_file(key: str) -> str:
-    expected = indexnow_key()
-    if expected is None or key != expected:
+def indexnow_key_file(key: str, request: Request) -> str:
+    expected = seo.indexnow_key(site_url(request))
+    if key != expected:
         raise HTTPException(status_code=404)
     return expected
 
