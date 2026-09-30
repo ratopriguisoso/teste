@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Criador — IA para criação de conteúdo</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <aside id="sidebar">
+    <div class="brand">✦ Criador</div>
+    <button id="new-chat" class="primary">+ Nova conversa</button>
+    <nav id="history"></nav>
+    <div id="model-info" class="muted"></div>
+  </aside>
+
+  <main>
+    <div id="banner" class="banner hidden"></div>
+
+    <section id="messages">
+      <div id="welcome">
+        <h1>O que vamos criar hoje?</h1>
+        <p class="muted">Escolha o formato e o tom lá embaixo, ou comece com um exemplo:</p>
+        <div class="examples">
+          <button data-type="instagram" data-prompt="Crie um post para a inauguração de uma cafeteria artesanal no centro da cidade.">☕ Post de inauguração de cafeteria</button>
+          <button data-type="video_curto" data-prompt="Roteiro de Reels com 3 dicas de produtividade para quem trabalha em casa.">🎬 Reels: dicas de produtividade</button>
+          <button data-type="ideias" data-prompt="Ideias de conteúdo para uma personal trainer que atende mulheres acima de 40 anos.">💡 Pautas para personal trainer</button>
+          <button data-type="email" data-prompt="E-mail de Black Friday para uma loja online de roupas femininas, 30% de desconto.">✉️ E-mail de Black Friday</button>
+        </div>
+      </div>
+    </section>
+
+    <form id="composer">
+      <div class="options">
+        <label>Formato
+          <select id="content-type">
+            <option value="livre">Livre</option>
+            <option value="instagram">Post Instagram</option>
+            <option value="linkedin">Post LinkedIn</option>
+            <option value="thread">Thread X/Twitter</option>
+            <option value="video_curto">Roteiro Reels/TikTok</option>
+            <option value="youtube">Roteiro YouTube</option>
+            <option value="blog">Artigo de blog (SEO)</option>
+            <option value="email">E-mail marketing</option>
+            <option value="ideias">Ideias de pauta</option>
+          </select>
+        </label>
+        <label>Tom
+          <select id="tone">
+            <option>profissional</option>
+            <option>descontraído</option>
+            <option>divertido</option>
+            <option>inspirador</option>
+            <option>persuasivo</option>
+            <option>educativo</option>
+          </select>
+        </label>
+        <label>Idioma
+          <select id="language">
+            <option>Português (Brasil)</option>
+            <option>English</option>
+            <option>Español</option>
+          </select>
+        </label>
+      </div>
+      <div class="input-row">
+        <textarea id="input" rows="1" placeholder="Descreva o conteúdo que você quer criar…"></textarea>
+        <button id="send" type="submit" class="primary">Enviar</button>
+        <button id="stop" type="button" class="hidden">Parar</button>
+      </div>
+    </form>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
