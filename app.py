@@ -184,12 +184,7 @@ background_tasks: set[asyncio.Task] = set()
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     site = seo.configured_site_url()
     if site:
-        try:
-            account = await seo.prepare_google(site)
-        except (httpx.HTTPError, ValueError, KeyError) as exc:
-            seo.log.warning("SEO: não foi possível preparar o Google: %s", exc)
-            account = None
-        task = asyncio.create_task(seo.auto_register(site, account))
+        task = asyncio.create_task(seo.auto_register(site))
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
     yield
@@ -260,30 +255,27 @@ async def chat(req: ChatRequest) -> StreamingResponse:
     return StreamingResponse(stream(), media_type="text/plain; charset=utf-8")
 
 
-def site_url(request: Request) -> str:
-    return seo.configured_site_url() or str(request.base_url).rstrip("/")
-
-
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request) -> str:
+def index() -> str:
     page = (BASE_DIR / "static" / "index.html").read_text()
-    return page.replace("{{SITE_URL}}", html.escape(site_url(request))).replace(
+    site = seo.configured_site_url() or ""
+    return page.replace("{{SITE_URL}}", html.escape(site)).replace(
         "<!-- SEO_VERIFICATION -->", seo.verification_meta_tags()
     )
 
 
 @app.get("/robots.txt", response_class=PlainTextResponse)
-def robots(request: Request) -> str:
-    return (
-        "User-agent: *\n"
-        "Allow: /\n"
-        "Disallow: /api/\n\n"
-        f"Sitemap: {site_url(request)}/sitemap.xml\n"
-    )
+def robots() -> str:
+    site = seo.configured_site_url()
+    rules = "User-agent: *\nAllow: /\nDisallow: /api/\n"
+    return rules + (f"\nSitemap: {site}/sitemap.xml\n" if site else "")
 
 
 @app.get("/sitemap.xml")
-def sitemap(request: Request) -> Response:
+def sitemap() -> Response:
+    site = seo.configured_site_url()
+    if site is None:
+        raise HTTPException(status_code=404, detail="Defina SITE_URL.")
     lastmod = datetime.fromtimestamp(
         (BASE_DIR / "static" / "index.html").stat().st_mtime, tz=timezone.utc
     ).date()
@@ -291,7 +283,7 @@ def sitemap(request: Request) -> Response:
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
         "  <url>\n"
-        f"    <loc>{html.escape(site_url(request))}/</loc>\n"
+        f"    <loc>{html.escape(site)}/</loc>\n"
         f"    <lastmod>{lastmod.isoformat()}</lastmod>\n"
         "    <changefreq>weekly</changefreq>\n"
         "    <priority>1.0</priority>\n"
@@ -308,7 +300,9 @@ def favicon() -> FileResponse:
 
 @app.get("/{key}.txt", response_class=PlainTextResponse)
 def indexnow_key_file(key: str, request: Request) -> str:
-    expected = seo.indexnow_key(site_url(request))
+    expected = seo.indexnow_key(
+        seo.configured_site_url() or str(request.base_url).rstrip("/")
+    )
     if key != expected:
         raise HTTPException(status_code=404)
     return expected

@@ -40,18 +40,16 @@ def indexnow_key(site: str) -> str:
 
 
 def verification_meta_tags() -> str:
-    values = {
-        "google-site-verification": os.environ.get(
-            "GOOGLE_SITE_VERIFICATION", ""
-        ).strip()
-        or google_meta_content
-        or "",
-        "msvalidate.01": os.environ.get("BING_SITE_VERIFICATION", "").strip(),
-        "yandex-verification": os.environ.get("YANDEX_SITE_VERIFICATION", "").strip(),
-    }
+    tags = [
+        ("google-site-verification", os.environ.get("GOOGLE_SITE_VERIFICATION", "")),
+        ("google-site-verification", google_meta_content or ""),
+        ("msvalidate.01", os.environ.get("BING_SITE_VERIFICATION", "")),
+        ("yandex-verification", os.environ.get("YANDEX_SITE_VERIFICATION", "")),
+    ]
+    unique = dict.fromkeys((name, value.strip()) for name, value in tags)
     return "\n  ".join(
         f'<meta name="{name}" content="{html.escape(value)}" />'
-        for name, value in values.items()
+        for name, value in unique
         if value
     )
 
@@ -59,9 +57,13 @@ def verification_meta_tags() -> str:
 def load_service_account() -> dict | None:
     raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
     path = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
-    if not raw and path:
-        raw = Path(path).read_text()
-    return json.loads(raw) if raw else None
+    try:
+        if not raw and path:
+            raw = Path(path).read_text()
+        return json.loads(raw) if raw else None
+    except (OSError, json.JSONDecodeError) as exc:
+        log.warning("SEO: conta de serviço do Google inválida: %s", exc)
+        return None
 
 
 async def google_access_token(client: httpx.AsyncClient, account: dict) -> str:
@@ -182,13 +184,21 @@ async def prepare_google(site: str) -> dict | None:
     return account
 
 
-async def auto_register(site: str, account: dict | None) -> None:
+async def auto_register(site: str) -> None:
+    try:
+        account = await prepare_google(site)
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        log.warning("SEO: não foi possível preparar o Google: %s", exc)
+        account = None
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
         if not await wait_until_live(client, site):
             log.warning("SEO: %s não respondeu; indexação automática cancelada.", site)
             return
-        resp = await submit_indexnow(client, site, [f"{site}/"])
-        log.info("SEO: IndexNow respondeu %s", resp.status_code)
+        try:
+            resp = await submit_indexnow(client, site, [f"{site}/"])
+            log.info("SEO: IndexNow respondeu %s", resp.status_code)
+        except httpx.HTTPError as exc:
+            log.warning("SEO: falha no IndexNow: %s", exc)
         if account is None:
             log.info(
                 "SEO: defina GOOGLE_SERVICE_ACCOUNT_JSON para cadastrar no Google."
@@ -204,3 +214,5 @@ async def auto_register(site: str, account: dict | None) -> None:
                 exc.response.status_code,
                 exc.response.text[:300],
             )
+        except (httpx.HTTPError, ValueError, KeyError) as exc:
+            log.warning("SEO: falha no Google: %s", exc)
