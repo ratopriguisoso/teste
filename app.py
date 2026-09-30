@@ -1,14 +1,26 @@
+import asyncio
+import html
 import json
 import os
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 import httpx
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    PlainTextResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+import seo
 
 BASE_DIR = Path(__file__).parent
 
@@ -108,7 +120,7 @@ def build_system_prompt(req: ChatRequest) -> str:
 def provider() -> tuple[str, str] | None:
     model = os.environ.get("MODEL", "").strip()
     if os.environ.get("OPENAI_API_KEY"):
-        return "openai", model or "gpt-4o-mini"
+        return "openai", model or "gpt-6-luna"
     if os.environ.get("ANTHROPIC_API_KEY"):
         return "anthropic", model or "claude-sonnet-4-5"
     return None
@@ -165,7 +177,20 @@ def extract_text(name: str, payload: dict) -> str:
     return ""
 
 
-app = FastAPI(title="Criador - IA para criação de conteúdo")
+background_tasks: set[asyncio.Task] = set()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    site = seo.configured_site_url()
+    if site:
+        task = asyncio.create_task(seo.auto_register(site))
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+    yield
+
+
+app = FastAPI(title="Criador - IA para criação de conteúdo", lifespan=lifespan)
 
 
 @app.get("/api/config")
@@ -230,9 +255,57 @@ async def chat(req: ChatRequest) -> StreamingResponse:
     return StreamingResponse(stream(), media_type="text/plain; charset=utf-8")
 
 
-@app.get("/")
-def index() -> FileResponse:
-    return FileResponse(BASE_DIR / "static" / "index.html")
+@app.get("/", response_class=HTMLResponse)
+def index() -> str:
+    page = (BASE_DIR / "static" / "index.html").read_text()
+    site = seo.configured_site_url() or ""
+    return page.replace("{{SITE_URL}}", html.escape(site)).replace(
+        "<!-- SEO_VERIFICATION -->", seo.verification_meta_tags()
+    )
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+def robots() -> str:
+    site = seo.configured_site_url()
+    rules = "User-agent: *\nAllow: /\nDisallow: /api/\n"
+    return rules + (f"\nSitemap: {site}/sitemap.xml\n" if site else "")
+
+
+@app.get("/sitemap.xml")
+def sitemap() -> Response:
+    site = seo.configured_site_url()
+    if site is None:
+        raise HTTPException(status_code=404, detail="Defina SITE_URL.")
+    lastmod = datetime.fromtimestamp(
+        (BASE_DIR / "static" / "index.html").stat().st_mtime, tz=timezone.utc
+    ).date()
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        "  <url>\n"
+        f"    <loc>{html.escape(site)}/</loc>\n"
+        f"    <lastmod>{lastmod.isoformat()}</lastmod>\n"
+        "    <changefreq>weekly</changefreq>\n"
+        "    <priority>1.0</priority>\n"
+        "  </url>\n"
+        "</urlset>\n"
+    )
+    return Response(content=xml, media_type="application/xml")
+
+
+@app.get("/favicon.ico")
+def favicon() -> FileResponse:
+    return FileResponse(BASE_DIR / "static" / "favicon.svg", media_type="image/svg+xml")
+
+
+@app.get("/{key}.txt", response_class=PlainTextResponse)
+def indexnow_key_file(key: str, request: Request) -> str:
+    expected = seo.indexnow_key(
+        seo.configured_site_url() or str(request.base_url).rstrip("/")
+    )
+    if key != expected:
+        raise HTTPException(status_code=404)
+    return expected
 
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
