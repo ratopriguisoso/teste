@@ -45,6 +45,21 @@ No Render o link do site é detectado sozinho (`RENDER_EXTERNAL_URL`), então n�
 `SITE_URL`, a não ser que use um domínio próprio. No plano grátis o site "dorme" após 15 minutos
 sem visitas e leva cerca de 1 minuto para acordar.
 
+## Analisador de SEO (`/seo`)
+
+Ferramenta para fazer **qualquer site** aparecer mais no Google. Abra http://localhost:8000/seo
+(ou `/seo?url=meusite.com.br`), cole o endereço e receba:
+
+- uma **nota de 0 a 100** e a lista do que está certo, com aviso ou com erro: HTTPS, velocidade,
+  bloqueio de indexação (noindex), `<title>`, meta description, H1/H2, quantidade de texto, `alt`
+  das imagens, versão mobile, idioma, link canônico, Open Graph, schema.org, favicon, links
+  internos, `robots.txt` e `sitemap.xml` — cada item com a dica de como corrigir;
+- um **plano de ação com IA** (precisa da chave OpenAI/Anthropic): correções com o código HTML
+  pronto, novos título e description, palavras-chave, ideias de conteúdo e passo a passo para
+  cadastrar no Google Search Console e Bing.
+
+Por segurança, só são analisados endereços públicos da internet.
+
 ## Aparecer no Google e outros buscadores (automático)
 
 O site já entrega o que os buscadores precisam: `/robots.txt`, `/sitemap.xml`, meta description,
@@ -84,4 +99,5 @@ python indexar.py https://meusite.com.br
 - `app.py` — servidor FastAPI; monta o prompt de sistema (formato, tom e idioma) e faz streaming da resposta do provedor.
 - `seo.py` — indexação automática (IndexNow e Google Search Console).
 - `indexar.py` — verifica o SEO do site publicado e reenvia aos buscadores.
+- `seo_audit.py` — analisador de SEO de qualquer site (usado pela página `/seo`).
 - `static/` — interface web (HTML, CSS e JavaScript puro).
